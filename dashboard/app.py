@@ -1,4 +1,4 @@
-# dashboard/app.py - Version complete et corrigee pour Neon
+# dashboard/app.py - Version complete et corrigee pour Streamlit Cloud + Neon
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -28,105 +28,111 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Connexion a la base de donnees
-@st.cache_resource
-def get_connection():
-    return psycopg2.connect(
-        host=os.environ.get("POSTGRES_HOST", "postgres"),
-        dbname=os.environ.get("POSTGRES_DB", "disasters"),
-        user=os.environ.get("POSTGRES_USER", "pipeline"),
-        password=os.environ.get("POSTGRES_PASSWORD", "pipeline123"),
-        port=5432,
-        sslmode="require",
-    )
+# ─── Connexion a la base de donnees (CORRIGE) ────────────────────────────────
+
+def get_db_params():
+    """Retourne les parametres de connexion sans ouvrir la connexion"""
+    return {
+        "host": os.environ.get("POSTGRES_HOST", "postgres"),
+        "dbname": os.environ.get("POSTGRES_DB", "disasters"),
+        "user": os.environ.get("POSTGRES_USER", "pipeline"),
+        "password": os.environ.get("POSTGRES_PASSWORD", "pipeline123"),
+        "port": 5432,
+        "sslmode": "require",
+    }
 
 @st.cache_data(ttl=300)
 def load_disasters():
     """Charge tous les desastres unifies (GDACS + EONET) depuis la couche Gold"""
-    conn = get_connection()
+    db_params = get_db_params()
+    
     try:
-        # Requete complete (production avec toutes les colonnes)
-        query = """
-            SELECT disaster_id, event_type, event_type_label, event_name,
-                   alert_level, alert_level_num, status, country, iso3,
-                   latitude, longitude, event_date, event_end_date,
-                   severity_value, severity_unit, population_affected,
-                   source_url, source_tag, is_active, event_day, event_month, event_year
-            FROM disasters_gold.gold_disasters
-            WHERE event_date IS NOT NULL
-            ORDER BY event_date DESC
-        """
-        df = pd.read_sql(query, conn)
+        # Utilisation de 'with' pour gestion automatique de la connexion
+        with psycopg2.connect(**db_params) as conn:
+            try:
+                # 1. Tente la requete complete (Production)
+                query = """
+                    SELECT disaster_id, event_type, event_type_label, event_name,
+                           alert_level, alert_level_num, status, country, iso3,
+                           latitude, longitude, event_date, event_end_date,
+                           severity_value, severity_unit, population_affected,
+                           source_url, source_tag, is_active, event_day, event_month, event_year
+                    FROM disasters_gold.gold_disasters
+                    WHERE event_date IS NOT NULL
+                    ORDER BY event_date DESC
+                """
+                df = pd.read_sql(query, conn)
+            except Exception:
+                # 2. Fallback : requete simplifiee compatible avec Neon
+                query = """
+                    SELECT disaster_id, event_type, event_type_label, event_name,
+                           alert_level, alert_level_num, status, country, iso3,
+                           latitude, longitude, event_date, population_affected,
+                           source_tag, is_active
+                    FROM disasters_gold.gold_disasters
+                    WHERE event_date IS NOT NULL
+                    ORDER BY event_date DESC
+                """
+                df = pd.read_sql(query, conn)
+                
+                # Ajoute les colonnes manquantes pour eviter les crashes
+                missing_cols = ['event_end_date', 'severity_value', 'severity_unit', 
+                                'source_url', 'event_day', 'event_month', 'event_year']
+                for col in missing_cols:
+                    if col not in df.columns:
+                        df[col] = None
+                        
+        return df
     except Exception as e:
-        # Fallback : requete simplifiee compatible avec Neon
-        st.warning("Mode demo active : utilisation des colonnes disponibles")
-        query = """
-            SELECT disaster_id, event_type, event_type_label, event_name,
-                   alert_level, alert_level_num, status, country, iso3,
-                   latitude, longitude, event_date, population_affected,
-                   source_tag, is_active
-            FROM disasters_gold.gold_disasters
-            WHERE event_date IS NOT NULL
-            ORDER BY event_date DESC
-        """
-        df = pd.read_sql(query, conn)
-        # Ajoute les colonnes manquantes pour eviter les crashes
-        missing_cols = ['event_end_date', 'severity_value', 'severity_unit', 
-                        'source_url', 'event_day', 'event_month', 'event_year']
-        for col in missing_cols:
-            if col not in df.columns:
-                df[col] = None
-    conn.close()
-    return df
+        st.error(f"Erreur chargement donnees: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(ttl=300)
 def load_by_country():
     """Charge les statistiques par pays"""
-    conn = get_connection()
+    db_params = get_db_params()
     try:
-        return pd.read_sql("""
-            SELECT country, iso3, total_disasters, ongoing_count,
-                   earthquake_count, flood_count, cyclone_count,
-                   drought_count, volcano_count, wildfire_count,
-                   total_population_affected, max_alert_level,
-                   latest_event_date
-            FROM disasters_marts.mart_disasters_by_country
-            WHERE total_disasters > 0
-            ORDER BY total_disasters DESC
-        """, conn)
+        with psycopg2.connect(**db_params) as conn:
+            return pd.read_sql("""
+                SELECT country, iso3, total_disasters, ongoing_count,
+                       earthquake_count, flood_count, cyclone_count,
+                       drought_count, volcano_count, wildfire_count,
+                       total_population_affected, max_alert_level,
+                       latest_event_date
+                FROM disasters_marts.mart_disasters_by_country
+                WHERE total_disasters > 0
+                ORDER BY total_disasters DESC
+            """, conn)
     except:
-        # Retourne un DataFrame vide si la table n'existe pas
         return pd.DataFrame(columns=['country', 'iso3', 'total_disasters'])
 
 @st.cache_data(ttl=300)
 def load_timeline():
     """Charge la timeline des desastres"""
-    conn = get_connection()
+    db_params = get_db_params()
     try:
-        return pd.read_sql("""
-            SELECT event_day, event_type, event_type_label,
-                   disaster_count, population_affected,
-                   red_alerts, orange_alerts, green_alerts
-            FROM disasters_marts.mart_disasters_timeline
-            ORDER BY event_day ASC
-        """, conn)
+        with psycopg2.connect(**db_params) as conn:
+            return pd.read_sql("""
+                SELECT event_day, event_type, event_type_label,
+                       disaster_count, population_affected,
+                       red_alerts, orange_alerts, green_alerts
+                FROM disasters_marts.mart_disasters_timeline
+                ORDER BY event_day ASC
+            """, conn)
     except:
-        # Retourne un DataFrame vide si la table n'existe pas
         return pd.DataFrame(columns=['event_day', 'event_type', 'disaster_count'])
 
-# Chargement des donnees
-try:
-    df = load_disasters()
-    df_country = load_by_country()
-    df_timeline = load_timeline()
-    data_ok = True
-except Exception as e:
-    st.error(f"Database connection failed: {e}")
-    st.info("Make sure PostgreSQL is running and credentials are correct.")
-    data_ok = False
+# ─── Chargement des donnees ──────────────────────────────────────────────────
+df = load_disasters()
+df_country = load_by_country()
+df_timeline = load_timeline()
+
+# Verifie qu'on a des donnees
+if df.empty:
+    st.error("Aucune donnee chargee. Verifiez la base de donnees.")
     st.stop()
 
-# Sidebar : Filtres
+# ─── Sidebar : Filtres ───────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🌍 Disaster Pipeline")
     st.caption("Real-time global disaster monitor")
@@ -157,7 +163,7 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
 
-# Application des filtres
+# ─── Application des filtres ─────────────────────────────────────────────────
 filtered = df.copy()
 if selected_type != "All":
     filtered = filtered[filtered["event_type_label"] == selected_type]
@@ -171,12 +177,12 @@ if date_range and len(date_range) == 2:
         (pd.to_datetime(filtered["event_date"]).dt.date <= date_range[1])
     ]
 
-# En-tete
+# ─── En-tete ─────────────────────────────────────────────────────────────────
 st.title("🌍 Global Disaster Dashboard")
 st.caption("Data from GDACS & NASA EONET · Powered by Airflow + dbt + PostgreSQL")
 st.divider()
 
-# KPIs
+# ─── KPIs ────────────────────────────────────────────────────────────────────
 k1, k2, k3, k4, k5 = st.columns(5)
 
 total = len(filtered)
@@ -196,7 +202,7 @@ with k5:
 
 st.divider()
 
-# Carte mondiale
+# ─── Carte mondiale ──────────────────────────────────────────────────────────
 st.markdown('<p class="section-header">🗺️ World Map — Disaster Locations</p>', unsafe_allow_html=True)
 
 if not filtered.empty and "latitude" in filtered.columns and "longitude" in filtered.columns:
@@ -247,7 +253,7 @@ if not filtered.empty and "latitude" in filtered.columns and "longitude" in filt
 else:
     st.info("No location data available.")
 
-# Timeline + Diagramme circulaire
+# ─── Timeline + Diagramme circulaire ─────────────────────────────────────────
 col_left, col_right = st.columns([3, 2])
 
 with col_left:
@@ -293,7 +299,7 @@ with col_right:
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-# Choropleth + Bar Chart
+# ─── Choropleth + Bar Chart ──────────────────────────────────────────────────
 st.markdown('<p class="section-header">🌐 Disasters by Country</p>', unsafe_allow_html=True)
 
 if not df_country.empty and "total_disasters" in df_country.columns and df_country["total_disasters"].sum() > 0:
@@ -334,7 +340,7 @@ if not filtered.empty and "event_type_label" in filtered.columns and "source_tag
         )
         st.plotly_chart(fig_fallback, use_container_width=True)
 
-# Tableau des evenements
+# ─── Tableau des evenements ──────────────────────────────────────────────────
 st.markdown('<p class="section-header">📋 Event Records</p>', unsafe_allow_html=True)
 search = st.text_input("🔍 Search", placeholder="e.g. Turkey, Flood, Wildfire...")
 
