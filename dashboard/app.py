@@ -1,4 +1,4 @@
-# dashboard/app.py - Ton code exact + protection tables manquantes
+# dashboard/app.py - Ton code exact + corrections minimales pour Neon
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -30,7 +30,7 @@ st.markdown("""
 
 # ─── Connexion à la base de données ──────────────────────────────────────────
 def get_connection():
-    """Connexion avec SSL pour Neon"""
+    """Connexion avec SSL pour Neon (sans cache pour éviter 'connection closed')"""
     host = os.environ.get("POSTGRES_HOST", "postgres")
     sslmode = "require" if "neon.tech" in host else "disable"
     return psycopg2.connect(
@@ -243,7 +243,6 @@ col_left, col_right = st.columns([3, 2])
 
 with col_left:
     st.markdown('<p class="section-header">📈 Disaster Timeline</p>', unsafe_allow_html=True)
-    # Affiche seulement si df_timeline a des données
     if not df_timeline.empty and "event_type" in df_timeline.columns and "event_day" in df_timeline.columns:
         tl = df_timeline[df_timeline["event_type"] == "ALL"].copy() if "event_type" in df_timeline.columns else df_timeline
         tl["event_day"] = pd.to_datetime(tl["event_day"])
@@ -289,7 +288,6 @@ with col_right:
 # ─── Choropleth + Bar Chart ──────────────────────────────────────────────────
 st.markdown('<p class="section-header">🌐 Disasters by Country</p>', unsafe_allow_html=True)
 
-# Affiche choropleth seulement si df_country a des données
 if not df_country.empty and "total_disasters" in df_country.columns and df_country["total_disasters"].sum() > 0:
     fig_choro = px.choropleth(
         df_country, locations="iso3", color="total_disasters",
