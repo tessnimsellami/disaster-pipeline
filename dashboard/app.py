@@ -1,4 +1,4 @@
-# dashboard/app.py - Version FINALE : Tous les affichages + connexion Neon robuste
+# dashboard/app.py - Ta version exacte + connexion Neon compatible
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -28,14 +28,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Connexion a la base de donnees (CORRIGE: SSL intelligent) ───────────────
+# ─── Connexion a la base de donnees (MODIFIEE POUR NEON) ────────────────────
 
 def get_db_params():
-    """Retourne les parametres de connexion adaptes (local ou cloud)"""
+    """Parametres de connexion adaptes local/cloud"""
     host = os.environ.get("POSTGRES_HOST", "postgres")
-    
-    # Detecter si on est sur Neon (cloud)
-    is_neon = "neon.tech" in host or "neon" in host.lower()
+    is_neon = "neon.tech" in host
     
     params = {
         "host": host,
@@ -44,63 +42,29 @@ def get_db_params():
         "password": os.environ.get("POSTGRES_PASSWORD", "pipeline123"),
         "port": 5432,
     }
-    
-    # SSL uniquement pour Neon
     if is_neon:
         params["sslmode"] = "require"
-    else:
-        params["sslmode"] = "disable"  # Local sans SSL
-    
     return params
 
 @st.cache_data(ttl=300)
 def load_disasters():
-    """Charge tous les desastres unifies (GDACS + EONET) depuis la couche Gold"""
+    """Charge tous les desastres - REQUETE SIMPLE COMPATIBLE NEON"""
     db_params = get_db_params()
-    
-    try:
-        with psycopg2.connect(**db_params) as conn:
-            try:
-                # 1. Tente la requete complete (Production)
-                query = """
-                    SELECT disaster_id, event_type, event_type_label, event_name,
-                           alert_level, alert_level_num, status, country, iso3,
-                           latitude, longitude, event_date, event_end_date,
-                           severity_value, severity_unit, population_affected,
-                           source_url, source_tag, is_active, event_day, event_month, event_year
-                    FROM disasters_gold.gold_disasters
-                    WHERE event_date IS NOT NULL
-                    ORDER BY event_date DESC
-                """
-                df = pd.read_sql(query, conn)
-            except Exception:
-                # 2. Fallback : requete simplifiee compatible avec Neon
-                query = """
-                    SELECT disaster_id, event_type, event_type_label, event_name,
-                           alert_level, alert_level_num, status, country, iso3,
-                           latitude, longitude, event_date, population_affected,
-                           source_tag, is_active
-                    FROM disasters_gold.gold_disasters
-                    WHERE event_date IS NOT NULL
-                    ORDER BY event_date DESC
-                """
-                df = pd.read_sql(query, conn)
-                
-                # Ajoute les colonnes manquantes pour eviter les crashes
-                missing_cols = ['event_end_date', 'severity_value', 'severity_unit', 
-                                'source_url', 'event_day', 'event_month', 'event_year']
-                for col in missing_cols:
-                    if col not in df.columns:
-                        df[col] = None
-                        
-        return df
-    except Exception as e:
-        st.error(f"Erreur chargement donnees: {e}")
-        return pd.DataFrame()
+    with psycopg2.connect(**db_params) as conn:
+        # REQUETE SIMPLIFIEE : uniquement les colonnes qui existent dans Neon
+        return pd.read_sql("""
+            SELECT disaster_id, event_type, event_type_label, event_name,
+                   alert_level, alert_level_num, status, country, iso3,
+                   latitude, longitude, event_date, population_affected,
+                   source_tag, is_active
+            FROM disasters_gold.gold_disasters
+            WHERE event_date IS NOT NULL
+            ORDER BY event_date DESC
+        """, conn)
 
 @st.cache_data(ttl=300)
 def load_by_country():
-    """Charge les statistiques par pays"""
+    """Statistiques par pays"""
     db_params = get_db_params()
     try:
         with psycopg2.connect(**db_params) as conn:
@@ -119,7 +83,7 @@ def load_by_country():
 
 @st.cache_data(ttl=300)
 def load_timeline():
-    """Charge la timeline des desastres"""
+    """Timeline des desastres"""
     db_params = get_db_params()
     try:
         with psycopg2.connect(**db_params) as conn:
@@ -139,7 +103,7 @@ df_country = load_by_country()
 df_timeline = load_timeline()
 
 if df.empty:
-    st.error("Aucune donnee chargee. Verifiez la base de donnees.")
+    st.error("Aucune donnee chargee.")
     st.stop()
 
 # ─── Sidebar : Filtres ───────────────────────────────────────────────────────
@@ -147,7 +111,6 @@ with st.sidebar:
     st.title("🌍 Disaster Pipeline")
     st.caption("Real-time global disaster monitor")
     st.divider()
-    
     st.markdown("### Filters")
     
     event_types = ["All"] + sorted(df["event_type_label"].dropna().unique().tolist())
@@ -194,7 +157,6 @@ st.divider()
 
 # KPIs
 k1, k2, k3, k4, k5 = st.columns(5)
-
 total = len(filtered)
 ongoing = int(filtered["is_active"].sum()) if "is_active" in filtered.columns else 0
 gdacs_count = len(filtered[filtered["source_tag"] == "GDACS"]) if "source_tag" in filtered.columns else 0
@@ -212,10 +174,8 @@ with k5:
 
 st.divider()
 
-# Carte mondiale (AVEC DEBUG INFO comme dans ta version working)
+# Carte mondiale (AVEC DEBUG INFO)
 st.markdown('<p class="section-header">🗺️ World Map — Disaster Locations</p>', unsafe_allow_html=True)
-
-# Debug: afficher infos sur les donnees (utile pour la demo)
 st.write(f"📊 Total filtered: {len(filtered)}")
 if "latitude" in filtered.columns:
     st.write(f"📍 Latitude non-null: {filtered['latitude'].notna().sum()}")
@@ -234,10 +194,6 @@ if not filtered.empty and "latitude" in filtered.columns and "longitude" in filt
         "Tropical Cyclone": "#FFE66D", "Drought": "#F7B731",
         "Volcano": "#FF4757", "Wildfire": "#FF7F50",
         "Tsunami": "#70A1FF", "Other": "#A29BFE",
-        "Volcanoes": "#FF4757", "Wildfires": "#FF7F50",
-        "Severe Storms": "#FFE66D", "Floods": "#4ECDC4",
-        "Earthquakes": "#FF6B6B", "Landslides": "#8B7355",
-        "Sea and Lake Ice": "#B0E0E6", "Dust and Haze": "#DEB887",
     }
     
     if "alert_level_num" in map_df.columns:
@@ -252,8 +208,7 @@ if not filtered.empty and "latitude" in filtered.columns and "longitude" in filt
             size="marker_size",
             hover_name="event_name" if "event_name" in map_df.columns else None,
             hover_data={"country": True, "alert_level": True, "status": True,
-                        "source_tag": True, "event_date": True,
-                        "latitude": False, "longitude": False, "marker_size": False},
+                        "source_tag": True, "event_date": True},
             color_discrete_map=color_map,
             template="plotly_dark",
             projection="natural earth",
@@ -309,7 +264,7 @@ with col_right:
         if not type_counts.empty:
             fig_pie = px.pie(
                 type_counts, values="count", names="type",
-                color="type", color_discrete_map=color_map if 'color_map' in locals() else None,
+                color="type",
                 hole=0.55, template="plotly_dark",
             )
             fig_pie.update_layout(
@@ -318,10 +273,9 @@ with col_right:
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-# Choropleth + Bar Chart (COMBINES - TOUJOURS AFFICHES comme dans ta version working)
+# Choropleth + Bar Chart
 st.markdown('<p class="section-header">🌐 Disasters by Country</p>', unsafe_allow_html=True)
 
-# ✅ TOUJOURS afficher la carte choroplethe si donnees pays disponibles (GDACS)
 if not df_country.empty and "total_disasters" in df_country.columns and df_country["total_disasters"].sum() > 0:
     fig_choro = px.choropleth(
         df_country, locations="iso3", color="total_disasters",
@@ -337,10 +291,8 @@ if not df_country.empty and "total_disasters" in df_country.columns and df_count
     )
     st.plotly_chart(fig_choro, use_container_width=True)
 
-# ✅ TOUJOURS afficher le bar chart par type + source (fonctionne pour TOUTES les sources)
 if not filtered.empty and "event_type_label" in filtered.columns and "source_tag" in filtered.columns:
     type_source_counts = filtered.groupby(['event_type_label', 'source_tag']).size().reset_index(name='count')
-    
     if not type_source_counts.empty:
         fig_fallback = px.bar(
             type_source_counts,
@@ -378,13 +330,12 @@ if not filtered.empty:
         table_df = table_df[mask]
 
     display_cols = [c for c in ["event_name", "event_type_label", "alert_level", "status",
-                    "country", "event_date", "severity_value", "severity_unit",
-                    "population_affected", "source_tag", "source_url"] if c in table_df.columns]
+                    "country", "event_date", "population_affected", "source_tag"] if c in table_df.columns]
     
     if display_cols:
         table_display = table_df[display_cols].copy()
         table_display.columns = ["Name", "Type", "Alert", "Status", "Country",
-                                  "Date", "Severity", "Unit", "Pop. Affected", "Source", "URL"][:len(table_display.columns)]
+                                  "Date", "Pop. Affected", "Source"][:len(table_display.columns)]
         
         if "Date" in table_display.columns:
             table_display["Date"] = pd.to_datetime(table_display["Date"], errors='coerce').dt.strftime("%Y-%m-%d")
@@ -399,7 +350,6 @@ if not filtered.empty:
             column_config={
                 "Alert": st.column_config.TextColumn(width="small"),
                 "Source": st.column_config.TextColumn(width="small"),
-                "URL": st.column_config.LinkColumn("Link", display_text="🔗 View"),
             },
         )
         st.caption(f"Showing {len(table_display):,} of {len(df):,} total records")
