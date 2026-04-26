@@ -1,0 +1,12 @@
+disaster_pipeline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: postgres
+      user: pipeline
+      password: pipeline123
+      port: 5432
+      dbname: disasters
+      schema: disasters   # ← garde ça, mais on va fixer le Streamlit plutôt
+      threads: 4

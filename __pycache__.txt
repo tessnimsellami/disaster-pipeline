@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.env
+.env.local
+*.log
+airflow-logs/
+target/
+dbt_packages/
+.venv/
+*.sqlitedb
+.vscode/
+.DS_Store
