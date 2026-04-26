@@ -1,4 +1,4 @@
-# migrate_all.py - Migre TOUTES les tables vers Neon
+# migrate_all.py - Migre TOUTES les tables vers Neon (Version corrigée)
 import psycopg2
 import subprocess
 
@@ -8,10 +8,10 @@ def migrate_table(table_name, schema="disasters_gold"):
     """Migre une table spécifique depuis Docker vers Neon"""
     print(f"   → Migration de {schema}.{table_name}...")
     
-    # Export depuis Docker
+    # Export depuis Docker (syntaxe f-string corrigée)
     result = subprocess.run(
         ["docker", "compose", "exec", "-T", "postgres", "pg_dump", "-U", "pipeline", 
-         "-d", "disasters", "--table=f"{schema}.{table_name}"", "--data-only", "--column-inserts"],
+         "-d", "disasters", f"--table={schema}.{table_name}", "--data-only", "--column-inserts"],
         capture_output=True, text=True, cwd="."
     )
     
@@ -20,9 +20,14 @@ def migrate_table(table_name, schema="disasters_gold"):
         return 0
     
     sql = result.stdout
-    # Adapter pour Neon: schema + ON CONFLICT
-    sql = sql.replace(f"INSERT INTO {table_name}", 
-                      f"INSERT INTO {schema}.{table_name} ON CONFLICT (disaster_id) DO UPDATE SET event_date=EXCLUDED.event_date")
+    # Nettoyer les références public. et ajouter le bon schéma
+    sql = sql.replace("public.", f"{schema}.")
+    sql = sql.replace(f"INSERT INTO {table_name}", f"INSERT INTO {schema}.{table_name}")
+    
+    # Ajouter ON CONFLICT uniquement pour la table qui a disaster_id comme PK
+    if table_name == "gold_disasters":
+        sql = sql.replace(f"INSERT INTO {schema}.{table_name}", 
+                          f"INSERT INTO {schema}.{table_name} ON CONFLICT (disaster_id) DO NOTHING")
     
     # Import vers Neon
     inserted = 0
@@ -36,7 +41,7 @@ def migrate_table(table_name, schema="disasters_gold"):
                         cur.execute(line + ";")
                         inserted += 1
                     except:
-                        pass  # Ignorer erreurs mineures
+                        pass  # Ignorer erreurs mineures/doublons
             conn.commit()
     
     return inserted
@@ -56,7 +61,7 @@ def main():
     timeline_count = migrate_table("mart_disasters_timeline", "disasters_marts")
     print(f"   ✅ mart_disasters_timeline: {timeline_count} lignes")
     
-    # Vérifier le total
+    # Vérifier le total final
     with psycopg2.connect(NEON_URI) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) FROM disasters_gold.gold_disasters;")
