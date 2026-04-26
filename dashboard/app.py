@@ -1,4 +1,4 @@
-# dashboard/app.py - Version finale complète
+# dashboard/app.py - Version FINALE : Tous les affichages + connexion Neon robuste
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -212,10 +212,10 @@ with k5:
 
 st.divider()
 
-# Carte mondiale
+# Carte mondiale (AVEC DEBUG INFO comme dans ta version working)
 st.markdown('<p class="section-header">🗺️ World Map — Disaster Locations</p>', unsafe_allow_html=True)
 
-# Debug info (utile pour la demo)
+# Debug: afficher infos sur les donnees (utile pour la demo)
 st.write(f"📊 Total filtered: {len(filtered)}")
 if "latitude" in filtered.columns:
     st.write(f"📍 Latitude non-null: {filtered['latitude'].notna().sum()}")
@@ -309,7 +309,7 @@ with col_right:
         if not type_counts.empty:
             fig_pie = px.pie(
                 type_counts, values="count", names="type",
-                color="type",
+                color="type", color_discrete_map=color_map if 'color_map' in locals() else None,
                 hole=0.55, template="plotly_dark",
             )
             fig_pie.update_layout(
@@ -318,9 +318,10 @@ with col_right:
             )
             st.plotly_chart(fig_pie, use_container_width=True)
 
-# Choropleth + Bar Chart
+# Choropleth + Bar Chart (COMBINES - TOUJOURS AFFICHES comme dans ta version working)
 st.markdown('<p class="section-header">🌐 Disasters by Country</p>', unsafe_allow_html=True)
 
+# ✅ TOUJOURS afficher la carte choroplethe si donnees pays disponibles (GDACS)
 if not df_country.empty and "total_disasters" in df_country.columns and df_country["total_disasters"].sum() > 0:
     fig_choro = px.choropleth(
         df_country, locations="iso3", color="total_disasters",
@@ -336,6 +337,7 @@ if not df_country.empty and "total_disasters" in df_country.columns and df_count
     )
     st.plotly_chart(fig_choro, use_container_width=True)
 
+# ✅ TOUJOURS afficher le bar chart par type + source (fonctionne pour TOUTES les sources)
 if not filtered.empty and "event_type_label" in filtered.columns and "source_tag" in filtered.columns:
     type_source_counts = filtered.groupby(['event_type_label', 'source_tag']).size().reset_index(name='count')
     
