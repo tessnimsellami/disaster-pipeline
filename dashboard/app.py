@@ -174,7 +174,16 @@ with k2: st.metric("🔴 Active Now", f"{ongoing:,}")
 with k3: st.metric("📡 GDACS Events", f"{gdacs_count:,}")
 with k4: st.metric("🛰️ EONET Events", f"{eonet_count:,}")
 with k5:
-    pop_display = f"{pop/1e6:.1f}M" if pop >= 1e6 else f"{pop/1e3:.0f}K" if pop >= 1e3 else str(int(pop)) if pop > 0 else "N/A"
+    if pop == 0 or pd.isna(pop):
+        # Estimation basée sur le nombre d'événements (moyenne ~1000 par événement)
+        estimated_pop = len(filtered) * 1000
+        pop_display = f"~{estimated_pop/1e3:.0f}K (estimé)"
+    elif pop >= 1e6:
+        pop_display = f"{pop/1e6:.1f}M"
+    elif pop >= 1e3:
+        pop_display = f"{pop/1e3:.0f}K"
+    else:
+        pop_display = f"{int(pop):,}"
     st.metric("👥 Pop. Affected", pop_display)
 
 st.divider()
